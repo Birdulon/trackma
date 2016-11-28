@@ -41,6 +41,7 @@ class Data():
     msg = None
     api = None
     showlist = None
+    friendlists = {}
     infocache = dict()
     queue = list()
     config = dict()
@@ -92,6 +93,7 @@ class Data():
         self.queue_file = utils.get_filename(userfolder, '%s.queue' % mediatype)
         self.info_file = utils.get_filename(userfolder,  '%s.info' % mediatype)
         self.cache_file = utils.get_filename(userfolder, '%s.list' % mediatype)
+        self.friends_cache_file = utils.get_filename(userfolder, '%s.friendlists' % mediatype)
         self.meta_file = utils.get_filename(userfolder, '%s.meta' % mediatype)
         self.lock_file = utils.get_filename(userfolder,  'lock')
 
@@ -488,10 +490,14 @@ class Data():
     def _load_cache(self):
         self.msg.debug(self.name, "Reading cache...")
         self.showlist = utils.load_data(self.cache_file)
+        if 'friends' in self.api.api_info and self.api.api_info['friends']:
+            self.friendlists = utils.load_data(self.friends_cache_file)
 
     def _save_cache(self):
         self.msg.debug(self.name, "Saving cache...")
         utils.save_data(self.showlist, self.cache_file)
+        if 'friends' in self.api.api_info and self.api.api_info['friends']:
+            utils.save_data(self.friendlists, self.friends_cache_file)
 
     def _load_info(self):
         self.msg.debug(self.name, "Reading info DB...")
@@ -529,6 +535,11 @@ class Data():
     def download_data(self):
         """Downloads the remote list and overwrites the cache"""
         self.showlist = self.api.fetch_list()
+        if 'friends' in self.api.api_info and self.api.api_info['friends'] and 'friends' in self.userconfig and self.userconfig['friends']:
+            for friend in self.userconfig['friends']:
+                if friend:
+                    self.friendlists[friend] = self.api.fetch_list(user=friend)
+            self.showlist = self.api.compare_friend_lists(self.showlist, self.friendlists)
 
         if self.api.api_info['merge']:
             # The API needs information to be merged from the
@@ -569,6 +580,9 @@ class Data():
         self.meta['lastget'] = time.time()
         self.meta['version'] = self.version
         self._save_meta()
+
+    def download_relations(self, id):
+        return self.api.fetch_relations(id)
 
     def _cache_exists(self):
         return os.path.isfile(self.cache_file)
