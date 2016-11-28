@@ -36,7 +36,7 @@ class libanilist(lib):
     msg = None
     logged_in = False
 
-    api_info = { 'name': 'Anilist', 'shortname': 'anilist', 'version': '1.1', 'merge': False }
+    api_info = { 'name': 'Anilist', 'shortname': 'anilist', 'version': '1.1', 'merge': False, 'friends': True }
     mediatypes = dict()
     mediatypes['anime'] = {
         'has_progress': True,
@@ -216,12 +216,16 @@ class libanilist(lib):
             self.logged_in = True
         return True
 
-    def fetch_list(self):
+    def fetch_list(self, user=None):
         self.check_credentials()
-        self.msg.info(self.name, 'Downloading list...')
+        if user is None:
+            user = self.userid
+            self.msg.info(self.name, 'Downloading %s list...' % self.mediatype)
+        else:
+            self.msg.info(self.name, 'Downloading %s\'s %s list...' % (user,self.mediatype) )
 
         param = {'access_token': self._get_userconfig('access_token')}
-        data = self._request("GET", "user/{0}/{1}list".format(self.userid, self.mediatype), get=param)
+        data = self._request("GET", "user/{0}/{1}list".format(user, self.mediatype), get=param)
 
         showlist = {}
         airinglist = []
@@ -277,6 +281,17 @@ class libanilist(lib):
                                 'next_ep_time': item['airing']['time'],
                             })
         return showlist
+
+    def compare_friend_lists(self, my_list, their_lists):
+        for id,show in my_list.items():
+            if 'friends_progress' not in show:
+                show['friends_progress'] = {}
+            for friend,list in their_lists.items():
+                if id in list:
+                    show['friends_progress'][friend] = list[id]['my_progress']
+                else:
+                    show['friends_progress'][friend] = -1
+        return my_list
 
     def add_show(self, item):
         self.check_credentials()
