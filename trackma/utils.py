@@ -32,6 +32,12 @@ STATUS_FINISHED = 2
 STATUS_NOTYET = 3
 STATUS_CANCELLED = 4
 
+RELATION_SEQUEL = 0
+RELATION_SIDE = 1
+RELATION_SUMMARY = 2
+RELATION_OTHER = 3
+RELATION_PREQUEL = 4
+
 # Put the available APIs here
 available_libs = {
     'anilist':  ('Anilist',      datadir + '/data/anilist.jpg',     LOGIN_OAUTH,
