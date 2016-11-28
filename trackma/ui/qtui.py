@@ -189,6 +189,10 @@ class Trackma(QMainWindow):
         action_details = QAction('Show &details...', self)
         action_details.setStatusTip('Show detailed information about the selected show.')
         action_details.triggered.connect(self.s_show_details)
+        # TODO: Remove or change this testing function
+        action_relations = QAction('Fetch &relations...', self)
+        action_relations.setStatusTip('Fetch relations for the selected show.')
+        action_relations.triggered.connect(self.s_show_relations)
         action_altname = QAction('Change &alternate name...', self)
         action_altname.setStatusTip('Set an alternate title for the tracker.')
         action_altname.triggered.connect(self.s_altname)
@@ -255,6 +259,7 @@ class Trackma(QMainWindow):
         #self.menu_show_context.addAction(action_play_dialog)
         self.menu_show_context.addMenu(self.menu_play)
         self.menu_show_context.addAction(action_details)
+        self.menu_show_context.addAction(action_relations)  # TODO: Remove or change testing function
         self.menu_show_context.addAction(action_altname)
         self.menu_show_context.addSeparator()
         self.menu_show_context.addAction(action_delete)
@@ -262,8 +267,9 @@ class Trackma(QMainWindow):
         # Context menu for right click on list header
         self.menu_columns = QMenu()
         self.available_columns = ['ID', 'Title', 'Progress', 'Score',
-                'Percent', 'Next Episode', 'Start date', 'End date',
-                'My start', 'My finish', 'Tags']
+                                  'Percent', 'Next Episode', 'Start date',
+                                  'End date', 'My start', 'My finish',
+                                  'Tags', 'Friend Progress']
         self.column_keys = {'id': 0,
                             'title': 1,
                             'progress': 2,
@@ -274,7 +280,8 @@ class Trackma(QMainWindow):
                             'date_end': 7,
                             'my_start': 8,
                             'my_end': 9,
-                            'tag': 10}
+                            'tag': 10,
+                            'friends': 11}
 
         self.menu_columns_group = QActionGroup(self, exclusive=False)
         self.menu_columns_group.triggered.connect(self.s_toggle_column)
@@ -721,7 +728,7 @@ class Trackma(QMainWindow):
         if show['total'] > 0:
             percent_widget.setMaximum(show['total'])
         else:
-            percent_widget.setMaximum((int(show['my_progress']/12)+1)*12) # Round up to the next cour
+            percent_widget.setMaximum((int(show['my_progress']/12)+1)*12)  # Round up to the next cour
         percent_widget.setValue(show['my_progress'])
 
         aired_eps = utils.estimate_aired_episodes(show)
@@ -746,25 +753,37 @@ class Trackma(QMainWindow):
         widget.setItem(row, 4, ShowItemNum( percent, "{:.0%}".format(percent), color ))
         widget.setCellWidget(row, 4, percent_widget )
         if 'date_next_ep' in self.mediainfo \
-        and self.mediainfo['date_next_ep'] \
-        and 'next_ep_time' in show \
-        and dateutil_available:
+                and self.mediainfo['date_next_ep'] \
+                and 'next_ep_time' in show \
+                and dateutil_available:
             next_ep_dt = dateutil.parser.parse(show['next_ep_time'])
             delta = next_ep_dt - datetime.datetime.now(dateutil.tz.tzutc())
-            widget.setItem(row, 5, ShowItem( "%i days, %02d hrs." % (delta.days, delta.seconds/3600), color, QtCore.Qt.AlignHCenter ))
+            widget.setItem(row, 5, ShowItem("%i days, %02d hrs." % (delta.days, delta.seconds/3600), color, QtCore.Qt.AlignHCenter))
         else:
-            widget.setItem(row, 5, ShowItem( "-", color, QtCore.Qt.AlignHCenter ))
-        widget.setItem(row, 6, ShowItemDate( show['start_date'], color ))
-        widget.setItem(row, 7, ShowItemDate( show['end_date'], color ))
-        widget.setItem(row, 8, ShowItemDate( show['my_start_date'], color ))
-        widget.setItem(row, 9, ShowItemDate( show['my_finish_date'], color ))
+            widget.setItem(row, 5, ShowItem("-", color, QtCore.Qt.AlignHCenter))
+        widget.setItem(row, 6, ShowItemDate(show['start_date'], color))
+        widget.setItem(row, 7, ShowItemDate(show['end_date'], color))
+        widget.setItem(row, 8, ShowItemDate(show['my_start_date'], color))
+        widget.setItem(row, 9, ShowItemDate(show['my_finish_date'], color))
         try:
             tag_str = show['my_tags']
             if not tag_str:
                 tag_str = '-'
         except:
             tag_str = '-'
-        widget.setItem(row, 10, ShowItem( tag_str, color ))
+        widget.setItem(row, 10, ShowItem(tag_str, color))
+        friend_str = ''
+        try:
+            for friend in self.worker.engine.get_userconfig('friends'):
+                try:
+                    prog = show['friends_progress'][friend]
+                    if prog >= 0:
+                        friend_str = friend_str + '%s: %2d ' % (friend[0:3], prog)
+                except:
+                    pass
+        except:
+            friend_str = 'No friends :('
+        widget.setItem(row, 11, ShowItem(friend_str, color))
 
     def _get_color(self, is_playing, show, eps):
         if is_playing:
@@ -820,7 +839,7 @@ class Trackma(QMainWindow):
             self.generate_episode_menus(self.menu_play, show['total'], show['my_progress'])
         else:
             self.show_progress.setMaximum(utils.estimate_aired_episodes(show))
-            self.generate_episode_menus(self.menu_play, utils.estimate_aired_episodes(show),show['my_progress'])
+            self.generate_episode_menus(self.menu_play, utils.estimate_aired_episodes(show), show['my_progress'])
 
         # Update information
         self.show_title.setText(show['title'])
@@ -858,9 +877,9 @@ class Trackma(QMainWindow):
                     self.show_image.setText('Not available')
 
         if show['total'] > 0:
-            self.show_progress_bar.setValue( show['my_progress'] )
+            self.show_progress_bar.setValue(show['my_progress'])
         else:
-            self.show_progress_bar.setValue( 0 )
+            self.show_progress_bar.setValue(0)
 
         # Make it global
         self.selected_show_id = show['id']
@@ -906,9 +925,9 @@ class Trackma(QMainWindow):
         return False
 
     def generate_episode_menus(self, menu, max_eps=1, watched_eps=0):
-        bp_top = 5  # No more than this many submenus/episodes in the root menu
-        bp_mid = 10 # No more than this many submenus in submenus
-        bp_btm = 13 # No more than this many episodes in the submenus
+        bp_top = 5   # No more than this many submenus/episodes in the root menu
+        bp_mid = 10  # No more than this many submenus in submenus
+        bp_btm = 13  # No more than this many episodes in the submenus
         # The number of episodes where we ditch the submenus entirely since Qt doesn't deserve this abuse
         breakpoint_no_menus = bp_top * bp_btm * bp_mid * bp_mid
 
@@ -1031,7 +1050,7 @@ class Trackma(QMainWindow):
     def s_show_selected(self, new, old=None):
         if new:
             index = new.row()
-            selected_id = self.notebook.currentWidget().item( index, 0 ).text()
+            selected_id = self.notebook.currentWidget().item(index, 0).text()
 
             # Attempt to convert to int if possible
             try:
@@ -1057,7 +1076,7 @@ class Trackma(QMainWindow):
         item = self.notebook.currentWidget().currentItem()
         if item:
             self.s_show_selected(item)
-        self.s_filter_changed() # Refresh filter
+        self.s_filter_changed()  # Refresh filter
 
     def s_filter_changed(self):
         tabs = []
@@ -1224,6 +1243,18 @@ class Trackma(QMainWindow):
         self.detailswindow.setModal(True)
         self.detailswindow.show()
 
+    def s_show_relations(self):
+        if 'can_relations' not in self.mediainfo or not self.mediainfo['can_relations']:
+            return
+        id = self.selected_show_id
+        if not id:
+            return
+        # TODO: Remove or change testing function
+        title = self.worker.engine.get_show_info(self.selected_show_id)['title']
+        self.relationswindow = RelationsDialog(None, self.worker, id, title, 0)
+        self.relationswindow.setModal(True)
+        self.relationswindow.show()
+
     def s_add(self):
         page = self.notebook.currentIndex()
         current_status = self.statuses_nums[page]
@@ -1238,7 +1269,7 @@ class Trackma(QMainWindow):
         self.reload(None, mediatype)
 
     def s_settings(self):
-        dialog = SettingsDialog(None, self.worker, self.config, self.configfile)
+        dialog = SettingsDialog(None, self.worker, self.config, self.configfile, self.api_config, self.api_configfile)
         dialog.saved.connect(self._update_config)
         dialog.exec_()
 
@@ -1313,7 +1344,7 @@ class Trackma(QMainWindow):
             self._rebuild_list(old_status)
 
         # Set notebook to the new page
-        self.notebook.setCurrentIndex( self.statuses_nums.index(show['my_status']) )
+        self.notebook.setCurrentIndex(self.statuses_nums.index(show['my_status']))
         # Refresh filter
         self.s_filter_changed()
 
@@ -1425,6 +1456,9 @@ class Trackma(QMainWindow):
             self.s_show_selected(None)
             self._update_queue_counter(len(self.worker.engine.get_queue()))
 
+            # Make sure any changes to the friends list propagate to the current data handler
+            self.accountman_widget.aborted.connect(self.worker.engine._data_load_userconfig)
+
             self.status('Ready.')
 
         self._unbusy()
@@ -1495,24 +1529,24 @@ class DetailsWidget(QWidget):
         show_title_font = QtGui.QFont()
         show_title_font.setBold(True)
         show_title_font.setPointSize(12)
-        self.show_title.setAlignment( QtCore.Qt.AlignCenter )
+        self.show_title.setAlignment(QtCore.Qt.AlignCenter)
         self.show_title.setFont(show_title_font)
 
         info_area = QWidget()
         info_layout = QGridLayout()
 
         self.show_image = QLabel()
-        self.show_image.setAlignment( QtCore.Qt.AlignTop )
+        self.show_image.setAlignment(QtCore.Qt.AlignTop)
         self.show_info = QLabel()
         self.show_info.setWordWrap(True)
-        self.show_info.setAlignment( QtCore.Qt.AlignTop )
+        self.show_info.setAlignment(QtCore.Qt.AlignTop)
         self.show_description = QLabel()
         self.show_description.setWordWrap(True)
-        self.show_description.setAlignment( QtCore.Qt.AlignTop )
+        self.show_description.setAlignment(QtCore.Qt.AlignTop)
 
-        info_layout.addWidget( self.show_image,        0,0,1,1 )
-        info_layout.addWidget( self.show_info,         1,0,1,1 )
-        info_layout.addWidget( self.show_description,  0,1,2,1 )
+        info_layout.addWidget(self.show_image,       0, 0, 1, 1)
+        info_layout.addWidget(self.show_info,        1, 0, 1, 1)
+        info_layout.addWidget(self.show_description, 0, 1, 2, 1)
 
         info_area.setLayout(info_layout)
 
@@ -1532,7 +1566,7 @@ class DetailsWidget(QWidget):
         self.worker.start()
 
     def load(self, show):
-        self.show_title.setText( "<a href=\"%s\">%s</a>" % (show['url'], show['title']) )
+        self.show_title.setText("<a href=\"%s\">%s</a>" % (show['url'], show['title']))
         self.show_title.setTextFormat(QtCore.Qt.RichText)
         self.show_title.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
         self.show_title.setOpenExternalLinks(True)
@@ -1554,7 +1588,7 @@ class DetailsWidget(QWidget):
             self.image_worker.start()
 
     def s_show_image(self, filename):
-        self.show_image.setPixmap( QtGui.QPixmap( filename ) )
+        self.show_image.setPixmap(QtGui.QPixmap(filename))
 
     def r_details_loaded(self, result):
         if result['success']:
@@ -1691,7 +1725,7 @@ class AddDialog(QDialog):
             self.table.setRowCount(len(self.results))
             i = 0
             for res in self.results:
-                self.table.setRowHeight(i, QtGui.QFontMetrics(self.table.font()).height() + 2);
+                self.table.setRowHeight(i, QtGui.QFontMetrics(self.table.font()).height() + 2)
                 self.table.setItem(i, 0, ShowItem(res['title']))
                 self.table.setItem(i, 1, ShowItem(res['type']))
                 self.table.setItem(i, 2, ShowItem(str(res['total'])))
@@ -1712,6 +1746,133 @@ class AddDialog(QDialog):
                 self.accept()
 
 
+class RelationsDialog(QDialog):
+    """
+    Currently this is only for confirming OVAs/second cours
+    At some point it may be used to link showids across APIs
+    """
+    worker = None
+    selected_show = None
+
+    relation_types = {
+        utils.RELATION_SEQUEL: 'Sequel',
+        utils.RELATION_SIDE: 'Side story',
+        utils.RELATION_SUMMARY: 'Summary',
+        utils.RELATION_OTHER: 'Other',
+        utils.RELATION_PREQUEL: 'Prequel',
+    }
+
+    def __init__(self, parent, worker, show_id, show_name, ep):
+        QMainWindow.__init__(self, parent)
+        self.setMinimumSize(700, 500)
+        self.setWindowTitle('Confirm show relation for %s episode %d' % (show_name, ep))
+        self.worker = worker
+        self.show_id = show_id
+        #self.worker.engine.get_show_relations(show_id)
+        self.worker_call('get_show_relations', self.r_fetched, show_id)
+        self.ep = ep
+
+        layout = QVBoxLayout()
+
+        # Create table
+        columns = ['Relation', 'Title', 'Type', 'Total']
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(columns))
+        self.table.setHorizontalHeaderLabels(columns)
+        self.table.horizontalHeader().setHighlightSections(False)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().hide()
+        self.table.setGridStyle(QtCore.Qt.NoPen)
+        self.table.setMaximumHeight(120)
+        h = self.table.horizontalHeader()
+        h.resizeSection(0, 80)
+        h.resizeSection(2, 70)
+        h.resizeSection(3, 60)
+        if pyqt_version is 5:
+            h.setSectionResizeMode(1, QHeaderView.Stretch)
+        else:
+            h.setResizeMode(1, QHeaderView.Stretch)
+        self.table.currentItemChanged.connect(self.s_show_selected)
+
+        bottom_buttons = QDialogButtonBox(self)
+        bottom_buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.select_btn = bottom_buttons.addButton("Confirm", QDialogButtonBox.AcceptRole)
+        bottom_buttons.accepted.connect(self.s_confirm)
+        bottom_buttons.rejected.connect(self.close)
+
+        # Info box
+        self.details = DetailsWidget(self, worker)
+
+        # Finish layout
+        layout.addWidget(self.details)
+        layout.addWidget(self.table)
+        layout.addWidget(bottom_buttons)
+        self.setLayout(layout)
+
+    def worker_call(self, function, ret_function, *args, **kwargs):
+        # Run worker in a thread
+        self.worker.set_function(function, ret_function, *args, **kwargs)
+        self.worker.start()
+
+    def _enable_widgets(self, enable):
+        self.table.setEnabled(enable)
+
+    # Slots
+    def s_show_selected(self, new, old=None):
+        if not new:
+            return
+
+        index = new.row()
+        self.selected_show = self.shows[index]
+        self.details.load(self.selected_show)
+        self.select_btn.setEnabled(True)
+
+    def s_confirm(self):
+        if self.selected_show:
+            self.worker_call('add_show', self.r_added, self.selected_show, self.current_status)
+
+    # Worker responses
+    def r_fetched(self, result):
+        if result['success']:
+            self._enable_widgets(True)
+
+            self.relations = result['relations']
+            self.shows = []
+
+            self.table.setRowCount(len(self.relations))
+            i = 0
+            for r in self.relations:
+                relation = self.relation_types[r[0]]
+                show_id = r[1]
+                show_title = r[2]
+                try:
+                    show = self.worker.engine.get_show_info(show_id)
+                except:
+                    searchlist = self.worker.engine.search(show_title)
+                    show = searchlist[0]
+                self.shows.append(show)
+
+                self.table.setRowHeight(i, QtGui.QFontMetrics(self.table.font()).height() + 2)
+                self.table.setItem(i, 0, ShowItem(relation))
+                self.table.setItem(i, 1, ShowItem(show_title))
+                self.table.setItem(i, 2, ShowItem(show['type']))
+                self.table.setItem(i, 3, ShowItem(str(show['total'])))
+
+                i += 1
+            self.s_show_selected(self.table.item(0, 0))
+            self.table.setCurrentItem(self.table.item(0, 0))
+        else:
+            self.table.setRowCount(0)
+
+        self._enable_widgets(True)
+
+    def r_added(self, result):
+        if result['success']:
+            pass
+
+
 class SettingsDialog(QDialog):
     worker = None
     config = None
@@ -1719,12 +1880,14 @@ class SettingsDialog(QDialog):
 
     saved = QtCore.pyqtSignal()
 
-    def __init__(self, parent, worker, config, configfile):
+    def __init__(self, parent, worker, config, configfile, api_config, api_configfile):
         QDialog.__init__(self, parent)
 
         self.worker = worker
         self.config = config
         self.configfile = configfile
+        self.api_config = api_config
+        self.api_configfile = api_configfile
         self.setStyleSheet("QGroupBox { font-weight: bold; } ")
         self.setWindowTitle('Settings')
         layout = QGridLayout()
@@ -2178,6 +2341,7 @@ class SettingsDialog(QDialog):
         self.config['colors'] = self.color_values
 
         utils.save_config(self.config, self.configfile)
+        utils.save_config(self.api_config, self.api_configfile)
 
         self.saved.emit()
 
@@ -2355,7 +2519,7 @@ class AccountDialog(QDialog):
         self.edit_btns.addItem('Update')
         self.edit_btns.addItem('Delete')
         self.edit_btns.addItem('Purge')
-        self.edit_btns.setItemData(1, 'Change the local password/PIN for this account', QtCore.Qt.ToolTipRole)
+        self.edit_btns.setItemData(1, 'Change the local password/PIN or friends list for this account', QtCore.Qt.ToolTipRole)
         self.edit_btns.setItemData(2, 'Remove this account from Trackma', QtCore.Qt.ToolTipRole)
         self.edit_btns.setItemData(3, 'Clear local DB for this account', QtCore.Qt.ToolTipRole)
         self.edit_btns.setCurrentIndex(0)
@@ -2385,8 +2549,13 @@ class AccountDialog(QDialog):
     def add(self):
         result = AccountAddDialog.do(icons=self.icons)
         if result:
-            (username, password, api) = result
+            (username, password, api, friends) = result
             self.accountman.add_account(username, password, api)
+            userfolder = "%s.%s" % (username, api)
+            userconfig_file = utils.get_filename(userfolder, 'user.json')
+            userconfig = utils.parse_config(userconfig_file, utils.userconfig_defaults)
+            userconfig['friends'] = friends
+            utils.save_config(userconfig, userconfig_file)
             self.rebuild()
 
     def edit(self):
@@ -2396,14 +2565,20 @@ class AccountDialog(QDialog):
         try:
             selected_account_num = self.table.selectedItems()[0].num
             acct = self.accountman.get_account(selected_account_num)
+            userfolder = "%s.%s" % (acct['username'], acct['api'])
+            userconfig_file = utils.get_filename(userfolder, 'user.json')
+            userconfig = utils.parse_config(userconfig_file, utils.userconfig_defaults)
             result = AccountAddDialog.do(icons=self.icons,
                                          edit=True,
                                          username=acct['username'],
                                          password=acct['password'],
-                                         api=acct['api'])
+                                         api=acct['api'],
+                                         friends=userconfig['friends'])
             if result:
-                (username, password, api) = result
+                (username, password, api, friends) = result
                 self.accountman.edit_account(selected_account_num, username, password, api)
+                userconfig['friends'] = friends
+                utils.save_config(userconfig, userconfig_file)
                 self.rebuild()
         except IndexError:
             self._error("Please select an account.")
@@ -2411,7 +2586,9 @@ class AccountDialog(QDialog):
     def delete(self):
         try:
             selected_account_num = self.table.selectedItems()[0].num
-            reply = QMessageBox.question(self, 'Confirmation', 'Do you want to delete the selected account?', QMessageBox.Yes, QMessageBox.No)
+            reply = QMessageBox.question(self, 'Confirmation',
+                                         'Do you want to delete the selected account?',
+                                         QMessageBox.Yes, QMessageBox.No)
 
             if reply == QMessageBox.Yes:
                 self.accountman.delete_account(selected_account_num)
@@ -2422,7 +2599,9 @@ class AccountDialog(QDialog):
     def purge(self):
         try:
             selected_account_num = self.table.selectedItems()[0].num
-            reply = QMessageBox.question(self, 'Confirmation', 'Do you want to purge the selected account\'s local data?', QMessageBox.Yes, QMessageBox.No)
+            reply = QMessageBox.question(self, 'Confirmation',
+                                         'Do you want to purge the selected account\'s local data?',
+                                         QMessageBox.Yes, QMessageBox.No)
 
             if reply == QMessageBox.Yes:
                 self.accountman.purge_account(selected_account_num)
@@ -2431,7 +2610,7 @@ class AccountDialog(QDialog):
             self._error("Please select an account.")
 
     def s_edit(self, index):
-        if   index is 1:
+        if index is 1:
             self.edit()
         elif index is 2:
             self.delete()
@@ -2547,7 +2726,7 @@ class ShowItemDate(ShowItem):
             return True
 
 
-class FilterBar():
+class FilterBar(object):
     """
     Constants relating to filter bar settings can live here.
     """
@@ -2680,7 +2859,7 @@ class EpisodeBar(QProgressBar):
 
 
 class AccountAddDialog(QDialog):
-    def __init__(self, parent, icons, edit=False, username='', password='', api=''):
+    def __init__(self, parent, icons, edit=False, username='', password='', api='', friends=''):
         QDialog.__init__(self, parent)
         self.edit = edit
 
@@ -2702,10 +2881,12 @@ class AccountAddDialog(QDialog):
         self.api_auth.setOpenExternalLinks(True)
         pin_layout.addWidget(self.password)
         pin_layout.addWidget(self.api_auth)
+        self.friendlist = QLineEdit(', '.join(friends))
 
         formlayout.addRow(QLabel('Site:'), self.api)
         formlayout.addRow(self.lbl_username, self.username)
         formlayout.addRow(self.lbl_password, pin_layout)
+        formlayout.addRow(QLabel('Friends:'), self.friendlist)
 
         bottombox = QDialogButtonBox()
         bottombox.addButton(QDialogButtonBox.Save)
@@ -2737,12 +2918,17 @@ class AccountAddDialog(QDialog):
         elif len(self.password.text()) is 0:
             self._error('Please fill the password/PIN field.')
         else:
-            self.accept()
+            try:
+                self.friends = str(self.friendlist.text()).split(', ')
+                self.accept()
+            except:
+                self._error('Please ensure each friend in your friends list is separated by a comma and space.')
 
     def s_refresh(self, index):
         if not self.edit:
             self.username.setText("")
             self.password.setText("")
+            self.friendlist.setText("")
 
         if pyqt_version is 5:
             apiname = self.api.itemData(index)
@@ -2752,7 +2938,7 @@ class AccountAddDialog(QDialog):
         if api[2] == utils.LOGIN_OAUTH:
             apiname = str(self.api.itemData(index))
             url = utils.available_libs[apiname][4]
-            self.api_auth.setText( "<a href=\"{}\">Request PIN</a>".format(url) )
+            self.api_auth.setText("<a href=\"{}\">Request PIN</a>".format(url))
             self.api_auth.show()
 
             self.lbl_username.setText('Name:')
@@ -2768,17 +2954,16 @@ class AccountAddDialog(QDialog):
         QMessageBox.critical(self, 'Error', msg, QMessageBox.Ok)
 
     @staticmethod
-    def do(parent=None, icons=None, edit=False, username='', password='', api=''):
-        dialog = AccountAddDialog(parent, icons, edit, username, password, api)
+    def do(parent=None, icons=None, edit=False, username='', password='', api='', friends=''):
+        dialog = AccountAddDialog(parent, icons, edit, username, password, api, friends)
         result = dialog.exec_()
 
         if result == QDialog.Accepted:
             currentIndex = dialog.api.currentIndex()
-            return (
-                    str(dialog.username.text()),
+            return (str(dialog.username.text()),
                     str(dialog.password.text()),
-                    str(dialog.api.itemData(currentIndex))
-                   )
+                    str(dialog.api.itemData(currentIndex)),
+                    dialog.friends)
         else:
             return None
 
@@ -2877,6 +3062,7 @@ class Engine_Worker(QtCore.QThread):
             'list_download': self._list_download,
             'list_upload': self._list_upload,
             'get_show_details': self._get_show_details,
+            'get_show_relations': self._get_show_relations,
             'search': self._search,
             'add_show': self._add_show,
             'delete_show': self._delete_show,
@@ -3038,6 +3224,15 @@ class Engine_Worker(QtCore.QThread):
             return {'success': False}
 
         return {'success': True, 'details': details}
+
+    def _get_show_relations(self, showid):
+        try:
+            relations = self.engine.get_show_relations(showid)
+        except utils.TrackmaError as e:
+            self._error(e)
+            return {'success': False}
+
+        return {'success': True, 'relations': relations}
 
     def _search(self, terms):
         try:
