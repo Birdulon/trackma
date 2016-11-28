@@ -38,12 +38,12 @@ class libmal(lib):
     """
     name = 'libmal'
 
-    username = '' # TODO Must be filled by check_credentials
+    username = ''  # TODO Must be filled by check_credentials
     logged_in = False
     opener = None
 
-    api_info =  { 'name': 'MyAnimeList', 'shortname': 'mal', 'version': '', 'merge': False }
-
+    api_info = {'name': 'MyAnimeList', 'shortname': 'mal',
+                'version': 'v0.3', 'merge': False, 'friends': True}
     default_mediatype = 'anime'
     mediatypes = dict()
     mediatypes['anime'] = {
@@ -56,6 +56,7 @@ class libmal(lib):
         'can_update': True,
         'can_play': True,
         'can_date': True,
+        'can_relations': True,
         'status_start': 1,
         'status_finish': 2,
         'statuses':  [1, 2, 3, 4, 6],
@@ -152,15 +153,19 @@ class libmal(lib):
         self.logged_in = True
         return True
 
-    def fetch_list(self):
+    def fetch_list(self, user=None):
         """Queries the full list from the remote server.
         Returns the list if successful, False otherwise."""
         self.check_credentials()
-        self.msg.info(self.name, 'Downloading list...')
+        if user is None:
+            user = self.username
+            self.msg.info(self.name, 'Downloading %s list...' % self.mediatype)
+        else:
+            self.msg.info(self.name, 'Downloading %s\'s %s list...' % (user, self.mediatype))
 
         try:
             # Get an XML list from MyAnimeList API
-            data = self._request("https://myanimelist.net/malappinfo.php?u="+self.username+"&status=all&type="+self.mediatype)
+            data = self._request("https://myanimelist.net/malappinfo.php?u="+user+"&status=all&type="+self.mediatype)
 
             # Parse the XML data and load it into a dictionary
             # using the proper function (anime or manga)
@@ -178,6 +183,45 @@ class libmal(lib):
             raise utils.APIError("Error getting list.")
         except IOError as e:
             raise utils.APIError("Error reading list: %s" % e)
+
+    def fetch_relations(self, id):
+        """
+        Fetch a show's page and parse its important relations
+        Returns list of relations in (type, id, name) format
+        This is more expensive than an API request but we do it rarely
+        """
+        # We only care about certain relations, adaptation is not useful
+        # Our goal is to determine what shows might share the series numbering
+        # Spin-offs and alternatives are highly unlikely to do so
+        relation_types = {
+            'Sequel:': utils.RELATION_SEQUEL,    # Most significant
+            'Side story:': utils.RELATION_SIDE,  # Probably OVA
+            'Summary:': utils.RELATION_SUMMARY,  # These are usually x.5 eps
+            'Other:': utils.RELATION_OTHER,      # Might be an OVA
+            'Prequel:': utils.RELATION_PREQUEL,  # Might be an OVA
+        }
+        rels = "|".join(relation_types.keys())
+        DIGITS = '8'  # Max number of digits that we expect for a show id
+
+        regex = '('+rels+r').*?<a href=\"\/'+self.mediatype+r'\/([0-9]{1,'+DIGITS+r'})\/.*?>(.*?)<\/a>'
+        data = self._request('http://myanimelist.net/anime/'+str(id))
+
+        # Capture the relations and comprehend them
+        matches = re.findall(regex, data)
+        relations = [(relation_types[t], int(id), name) for (t, id, name) in matches]
+
+        return relations
+
+    def compare_friend_lists(self, my_list, their_lists):
+        for id, show in my_list.items():
+            if 'friends_progress' not in show:
+                show['friends_progress'] = {}
+            for friend, list in their_lists.items():
+                if id in list:
+                    show['friends_progress'][friend] = list[id]['my_progress']
+                else:
+                    show['friends_progress'][friend] = -1
+        return my_list
 
     def add_show(self, item):
         """Adds a new show in the server"""
@@ -249,11 +293,11 @@ class libmal(lib):
         # we handle statuses as integers, we need to convert them
         if self.mediatype == 'anime':
             status_translate = {'Currently Airing': utils.STATUS_AIRING,
-                    'Finished Airing': utils.STATUS_FINISHED,
-                    'Not yet aired': utils.STATUS_NOTYET}
+                                'Finished Airing': utils.STATUS_FINISHED,
+                                'Not yet aired': utils.STATUS_NOTYET}
         elif self.mediatype == 'manga':
             status_translate = {'Publishing': utils.STATUS_AIRING,
-                    'Finished': utils.STATUS_AIRING}
+                                'Finished': utils.STATUS_AIRING}
 
         entries = list()
         for child in root.iter('entry'):
@@ -263,12 +307,12 @@ class libmal(lib):
                 'id':           showid,
                 'title':        child.find('title').text,
                 'type':         child.find('type').text,
-                'status':       status_translate[child.find('status').text], # TODO : This should return an int!
+                'status':       status_translate[child.find('status').text],
                 'total':        int(child.find(episodes_str).text),
                 'image':        child.find('image').text,
                 'url':          "https://myanimelist.net/anime/%d" % showid,
-                'start_date':   self._str2date( child.find('start_date').text ),
-                'end_date':     self._str2date( child.find('end_date').text ),
+                'start_date':   self._str2date(child.find('start_date').text),
+                'end_date':     self._str2date(child.find('end_date').text),
                 'extra': [
                     ('English',  child.find('english').text),
                     ('Synonyms', child.find('synonyms').text),
@@ -280,7 +324,7 @@ class libmal(lib):
                     ('Start date', child.find('start_date').text),
                     ('End date', child.find('end_date').text),
                     ]
-            })
+                })
             entries.append(show)
 
         self._emit_signal('show_info_changed', entries)
@@ -302,10 +346,10 @@ class libmal(lib):
                     showid = info['id']
                     resultdict[showid] = info
 
-        itemids = [ show['id'] for show in itemlist ]
+        itemids = [show['id'] for show in itemlist]
 
         try:
-            reslist = [ resultdict[itemid] for itemid in itemids ]
+            reslist = [resultdict[itemid] for itemid in itemids]
         except KeyError:
             raise utils.APIError('There was a problem getting the show details.')
 
@@ -335,16 +379,16 @@ class libmal(lib):
                 'my_progress':  int(child.find('my_watched_episodes').text),
                 'my_status':    int(child.find('my_status').text),
                 'my_score':     int(child.find('my_score').text),
-                'my_start_date':  self._str2date( child.find('my_start_date').text ),
-                'my_finish_date': self._str2date( child.find('my_finish_date').text ),
+                'my_start_date':  self._str2date(child.find('my_start_date').text),
+                'my_finish_date': self._str2date(child.find('my_finish_date').text),
                 'my_tags':         child.find('my_tags').text,
                 'total':     int(child.find('series_episodes').text),
                 'status':       int(child.find('series_status').text),
-                'start_date':   self._str2date( child.find('series_start').text ),
-                'end_date':     self._str2date( child.find('series_end').text ),
+                'start_date':   self._str2date(child.find('series_start').text),
+                'end_date':     self._str2date(child.find('series_end').text),
                 'image':        child.find('series_image').text,
                 'url':          "https://myanimelist.net/anime/%d" % show_id,
-            })
+                })
             showlist[show_id] = show
         return showlist
 
@@ -366,15 +410,15 @@ class libmal(lib):
                 'my_progress':  int(child.find('my_read_chapters').text),
                 'my_status':    int(child.find('my_status').text),
                 'my_score':     int(child.find('my_score').text),
-                'my_start_date':  self._str2date( child.find('my_start_date').text ),
-                'my_finish_date': self._str2date( child.find('my_finish_date').text ),
+                'my_start_date':  self._str2date(child.find('my_start_date').text),
+                'my_finish_date': self._str2date(child.find('my_finish_date').text),
                 'total':     int(child.find('series_chapters').text),
                 'status':       int(child.find('series_status').text),
-                'start_date':   self._str2date( child.find('series_start').text ),
-                'end_date':     self._str2date( child.find('series_end').text ),
+                'start_date':   self._str2date(child.find('series_start').text),
+                'end_date':     self._str2date(child.find('series_end').text),
                 'image':        child.find('series_image').text,
                 'url':          "https://myanimelist.net/manga/%d" % manga_id,
-            })
+                })
             mangalist[manga_id] = show
         return mangalist
 
