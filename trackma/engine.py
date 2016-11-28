@@ -127,6 +127,9 @@ class Engine:
         # Record the API details
         (self.api_info, self.mediainfo) = self.data_handler.get_api_info()
 
+    def _data_load_userconfig(self):
+        self.data_handler._load_userconfig()
+
     def _data_show_synced(self, show, changes):
         self._emit_signal('show_synced', show, changes)
 
@@ -186,6 +189,7 @@ class Engine:
             tracker_list.append({'id': show['id'],
                                  'title': show['title'],
                                  'my_progress': show['my_progress'],
+                                 'total': show['total'],
                                  'type': None,
                                  'titles': self.data_handler.get_show_titles(show),
                                  })  # TODO types
@@ -320,6 +324,15 @@ class Engine:
 
         try:
             return showdict[showid]
+        except KeyError:
+            raise utils.EngineError("Show not found.")
+
+    def get_show_relations(self, showid):
+        """
+        Returns the show relations for the specified **showid**.
+        """
+        try:
+            return self.data_handler.download_relations(showid)
         except KeyError:
             raise utils.EngineError("Show not found.")
 
@@ -624,23 +637,17 @@ class Engine:
         # Check over video files and propose our best candidate
         for (fullpath, filename) in utils.regex_find_videos('mkv|mp4|avi', self.config['searchdir']):
             # Analyze what's the title and episode of the file
-            aie = AnimeInfoExtractor(filename)
-            candidate_title = aie.getName()
-            candidate_episode_start, candidate_episode_end = aie.getEpisodeNumbers()
+            aie = extras.AnimeInfoExtractor.AnimeInfoExtractor(filename)
+            candidate_title = aie.get_name()
+            candidate_episode_start, candidate_episode_end = aie.get_episode_numbers()
 
-            # Skip this file if we couldn't analyze it
-            if not candidate_title:
+            # Skip this file if we couldn't analyze it or it isn't the episode we want
+            if (
+                not candidate_title or
+                not (episode >= candidate_episode_start and episode <= candidate_episode_end) or
+                (candidate_episode_end == '' and episode != candidate_episode_start)
+               ):
                 continue
-            if candidate_episode_start is None:
-                continue
-
-            # Skip this file if it isn't the episode we want
-            if candidate_episode_end is None:
-                if episode != candidate_episode_start:
-                    continue
-            else:
-                if not (candidate_episode_start <= episode <= candidate_episode_end):
-                    continue
 
             matcher.set_seq1(candidate_title.lower())
 
