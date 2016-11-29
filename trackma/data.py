@@ -503,7 +503,8 @@ class Data():
         self.msg.debug(self.name, "Reading cache...")
         self.showlist = utils.load_data(self.cache_file)
         if 'friends' in self.api.api_info and self.api.api_info['friends']:
-            self.friendlists = utils.load_data(self.friends_cache_file)
+            if self._friends_cache_exists():
+                self.friendlists = utils.load_data(self.friends_cache_file)
 
     def _save_cache(self):
         self.msg.debug(self.name, "Saving cache...")
@@ -599,6 +600,9 @@ class Data():
 
     def _cache_exists(self):
         return os.path.isfile(self.cache_file)
+
+    def _friends_cache_exists(self):
+        return os.path.isfile(self.friends_cache_file)
 
     def _info_exists(self):
         return os.path.isfile(self.info_file)
