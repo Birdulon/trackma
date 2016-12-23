@@ -294,6 +294,7 @@ userconfig_defaults = {
     'mediatype': '',
     'userid': 0,
     'username': '',
+    'friends': '',
 }
 curses_defaults = {
     'show_help': True,
