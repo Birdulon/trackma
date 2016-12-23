@@ -143,13 +143,15 @@ class libanilist(lib):
             ))
 
         try:
-            response = self.opener.open(request, timeout = 10)
+            response = self.opener.open(request, timeout=10)
             return json.loads(response.read().decode('utf-8'))
         except urllib.request.HTTPError as e:
             if e.code == 400:
                 raise utils.APIError("Invalid PIN. It is either probably expired or meant for another application.")
             else:
                 raise utils.APIError("Connection error: %s" % e)
+        except urllib.request.URLError as e:
+            raise utils.APIError("Connection error: %s" % e)
         except socket.timeout:
             raise utils.APIError("Connection timed out.")
 
