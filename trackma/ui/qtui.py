@@ -32,6 +32,7 @@ if not skip_pyqt5:
             QGridLayout, QHBoxLayout, QVBoxLayout,
             QAbstractItemView, QHeaderView, QListWidget,
             QListWidgetItem, QTabWidget, QTableWidget,
+            QSplitter,
             QTableWidgetItem, QFrame, QScrollArea,
             QStackedWidget, QWidget, QCheckBox, QComboBox,
             QDoubleSpinBox, QGroupBox, QLineEdit,
@@ -55,6 +56,7 @@ if pyqt_version is 0:
             QApplication, QMainWindow, QFormLayout,
             QGridLayout, QHBoxLayout, QVBoxLayout,
             QAbstractItemView, QHeaderView, QListWidget,
+            QSplitter,
             QListWidgetItem, QTabWidget, QTableWidget,
             QTableWidgetItem, QFrame, QScrollArea,
             QStackedWidget, QWidget, QCheckBox,
@@ -1643,7 +1645,7 @@ class DetailsWidget(QWidget):
         self.worker.start()
 
     def load(self, show):
-        self.show_title.setText("<a href=\"%s\">%s</a>" % (show['url'], show['title']))
+        self.show_title.setText('<a href="{url}">{title}</a>'.format(**show))
         self.show_title.setTextFormat(QtCore.Qt.RichText)
         self.show_title.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
         self.show_title.setOpenExternalLinks(True)
@@ -1655,7 +1657,7 @@ class DetailsWidget(QWidget):
 
         # Load show image
         if show.get('image'):
-            filename = utils.get_filename('cache', "%s_%s_f_%s.jpg" % (api_info['shortname'], api_info['mediatype'], show['id']))
+            filename = utils.get_filename('cache', '{shortname}_{mediatype}_f_{id}.jpg'.format(**api_info, **show))
 
             if os.path.isfile(filename):
                 self.s_show_image(filename)
@@ -1676,27 +1678,24 @@ class DetailsWidget(QWidget):
 
             info_strings = []
             description_strings = []
-            description_keys = {'Synopsis', 'English', 'Japanese', 'Synonyms'} # This might come down to personal preference
-            list_keys = {'Genres'} # Anilist gives genres as a list, need a special case to fix formatting
+            description_keys = {'Synopsis', 'English', 'Japanese', 'Synonyms'}  # This might come down to personal preference
 
-            for line in details['extra']:
-                if line[0] and line[1]:
-                    if line[0] in description_keys:
-                        description_strings.append( "<h3>%s</h3><p>%s</p>" % (line[0], line[1]) )
+            for key, value in details['extra']:
+                if key and value:
+                    if type(value) in (list, tuple):
+                      value = ', '.join([v for v in value if v])  # Prune blank genres
+
+                    if key in description_keys:
+                        description_strings.append('<h3>{}</h3><p>{}</p>'.format(key, value))
+                    elif len("%s" % value) >= 17:  # Avoid short tidbits taking up too much vertical space
+                        info_strings.append('<h3>{}</h3><p>{}</p>'.format(key, value))
                     else:
-                        if line[0] in list_keys:
-                            description_strings.append( "<h3>%s</h3><p>%s</p>" % (line[0], ', '.join(line[1])) )
-                        elif len("%s" % line[1]) >= 17: # Avoid short tidbits taking up too much vertical space
-                            info_strings.append( "<h3>%s</h3><p>%s</p>" % (line[0], line[1]) )
-                        else:
-                            info_strings.append( "<p><b>%s:</b> %s</p>" % (line[0], line[1]) )
+                        info_strings.append('<p><b>{}:</b> {}</p>'.format(key, value))
 
-            info_string = ''.join(info_strings)
-            self.show_info.setText( info_string )
-            description_string = ''.join(description_strings)
-            self.show_description.setText( description_string )
+            self.show_info.setText(''.join(info_strings))
+            self.show_description.setText(''.join(description_strings))
         else:
-            self.show_info.setText( 'There was an error while getting details.' )
+            self.show_info.setText('There was an error while getting details.')
 
 
 class AddDialog(QDialog):
@@ -1714,7 +1713,7 @@ class AddDialog(QDialog):
         if default:
             self.setWindowTitle('Search/Add from Remote for new show: %s' % default)
 
-        layout = QGridLayout()
+        layout = QVBoxLayout()
 
         # Create top layout
         top_layout = QHBoxLayout()
@@ -1730,9 +1729,13 @@ class AddDialog(QDialog):
         top_layout.addWidget(self.search_txt)
         top_layout.addWidget(self.search_btn)
 
+        # Create middle box
+        middle = QSplitter()
+
         # Create table
         columns = ['Title', 'Type', 'Total']
         self.table = QTableWidget()
+        self.table.setMinimumWidth(300)
         self.table.setSortingEnabled(True)
         self.table.horizontalHeader().sortIndicatorChanged.connect(self.sort_results)
         self.table.setColumnCount(len(columns))
@@ -1747,6 +1750,7 @@ class AddDialog(QDialog):
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         else:
             self.table.horizontalHeader().setResizeMode(0, QHeaderView.Stretch)
+        self.table.resizeColumnsToContents()
         self.table.currentItemChanged.connect(self.s_show_selected)
         #self.table.doubleClicked.connect(self.s_show_details)
 
@@ -1760,10 +1764,12 @@ class AddDialog(QDialog):
         self.details = DetailsWidget(self, worker)
 
         # Finish layout
-        layout.addLayout(top_layout,     0, 0, 1, 2)
-        layout.addWidget(self.table,     1, 0, 1, 1)
-        layout.addWidget(self.details,   1, 1, 1, 1)
-        layout.addWidget(bottom_buttons, 2, 0, 1, 2)
+        layout.addLayout(top_layout)
+        middle.addWidget(self.table)
+        middle.addWidget(self.details)
+        middle.setChildrenCollapsible(False)
+        layout.addWidget(middle)
+        layout.addWidget(bottom_buttons)
         self.setLayout(layout)
 
     def worker_call(self, function, ret_function, *args, **kwargs):
@@ -1821,8 +1827,8 @@ class AddDialog(QDialog):
             for res in self.results:
                 self.table.setRowHeight(i, QtGui.QFontMetrics(self.table.font()).height() + 2)
                 self.table.setItem(i, 0, ShowItem(res['title']))
-                self.table.setItem(i, 1, ShowItem(res['type']))
-                self.table.setItem(i, 2, ShowItem(str(res['total'])))
+                self.table.setItem(i, 1, ShowItem(res['type'], alignment=QtCore.Qt.AlignHCenter))
+                self.table.setItem(i, 2, ShowItem(str(res['total']), alignment=QtCore.Qt.AlignHCenter))
 
                 i += 1
             if self.table.currentRow() is 0:  # Row number hasn't changed but the data probably has!
