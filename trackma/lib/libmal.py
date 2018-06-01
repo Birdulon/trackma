@@ -121,7 +121,7 @@ class libmal(lib):
                         "non-alphanumeric characters in your password due to an upstream "
                         "MAL bug (#138).")
             else:
-                raise utils.APIError("HTTP error %d: %s" % (e.code, e.reason))
+                raise utils.APIError('HTTP error {}: {} url {}'.format(e.code, e.reason, url))
         except urllib.request.URLError as e:
             raise utils.APIError("Connection error: %s" % e)
 
