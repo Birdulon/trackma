@@ -36,7 +36,7 @@ class libanilist(lib):
     msg = None
     logged_in = False
 
-    api_info = { 'name': 'Anilist', 'shortname': 'anilist', 'version': '2.0', 'merge': False }
+    api_info = { 'name': 'Anilist', 'shortname': 'anilist', 'version': '2.0', 'merge': False, 'friends': True }
     mediatypes = dict()
     mediatypes['anime'] = {
         'has_progress': True,
@@ -179,9 +179,13 @@ class libanilist(lib):
 
         self.userid = data['id']
 
-    def fetch_list(self):
+    def fetch_list(self, user=None):
         self.check_credentials()
-        self.msg.info(self.name, 'Downloading list...')
+        if user is None:
+            user = self.userid
+            self.msg.info(self.name, 'Downloading %s list...' % self.mediatype)
+        else:
+            self.msg.info(self.name, 'Downloading %s\'s %s list...' % (user,self.mediatype) )
 
         query = '''query ($id: Int!, $listType: MediaType) {
   MediaListCollection (userId: $id, type: $listType) {
@@ -227,7 +231,7 @@ fragment mediaListEntry on MediaList {
     siteUrl
   }
 }'''
-        variables = {'id': self.userid, 'listType': self.mediatype.upper()}
+        variables = {'id': user, 'listType': self.mediatype.upper()}
         data = self._request(query, variables)['data']['MediaListCollection']
 
         showlist = {}
@@ -274,6 +278,17 @@ fragment mediaListEntry on MediaList {
                 show.update({k:v for k,v in showdata.items() if v})
                 showlist[showid] = show
         return showlist
+
+    def compare_friend_lists(self, my_list, their_lists):
+        for id,show in my_list.items():
+            if 'friends_progress' not in show:
+                show['friends_progress'] = {}
+            for friend,list in their_lists.items():
+                if id in list:
+                    show['friends_progress'][friend] = list[id]['my_progress']
+                else:
+                    show['friends_progress'][friend] = -1
+        return my_list
 
     args_SaveMediaListEntry = {
         'id': 'Int',                         # The list entry id, required for updating
